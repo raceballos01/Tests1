@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Generador de Dashboards</title>
+
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+
+<style>
+/* ============================================================
+   1. VARIABLES DE DISEÑO
+   ============================================================ */
+:root{
+  --fondo:#1F305C;
+  --panel:#1E2B3B;
+  --header:#182843;
+  --plot:#1C2639;
+  --borde:#3C5478;
+  --cian:#1F9DC4;
+  --ambar:#F09C18;
+  --magenta:#C0398C;
+  --verde:#2FA98C;
+  --texto:#FFFFFF;
+  --texto2:#8DA2B8;
+  --fuente:"Segoe UI",system-ui,-apple-system,sans-serif;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--fondo);color:var(--texto);font-family:var(--fuente);font-size:14px}
+
+/* ============================================================
+   2. PANTALLA - ESTRUCTURA
+   ============================================================ */
+.barra{
+  background:var(--header);border-bottom:1px solid var(--borde);
+  padding:14px 22px;display:flex;align-items:center;gap:16px;flex-wrap:wrap
+}
+.barra h1{font-size:18px;font-weight:600;letter-spacing:.2px}
+.barra .sub{color:var(--texto2);font-size:12px}
+.barra .der{margin-left:auto;display:flex;gap:10px}
+
+.btn{
+  background:var(--cian);color:#06202B;border:0;border-radius:5px;
+  padding:9px 16px;font-family:var(--fuente);font-size:13px;font-weight:600;cursor:pointer
+}
+.btn:hover{filter:brightness(1.1)}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn.sec{background:transparent;color:var(--texto2);border:1px solid var(--borde)}
+.btn.sec:hover{color:var(--texto);border-color:var(--cian)}
+
+.lienzo{padding:22px;max-width:1500px;margin:0 auto}
+
+/* zona de carga */
+#zona{
+  border:2px dashed var(--borde);border-radius:8px;background:var(--panel);
+  padding:54px 24px;text-align:center;cursor:pointer;transition:.15s
+}
+#zona:hover,#zona.activa{border-color:var(--cian);background:#22334A}
+#zona .icono{font-size:40px;margin-bottom:10px}
+#zona .t1{font-size:17px;font-weight:600;margin-bottom:6px}
+#zona .t2{color:var(--texto2);font-size:13px}
+
+/* filtros */
+.filtros{
+  background:var(--panel);border:1px solid var(--borde);border-radius:6px;
+  padding:14px 16px;margin-bottom:18px;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap
+}
+.campo{display:flex;flex-direction:column;gap:5px;min-width:150px}
+.campo label{font-size:11px;color:var(--texto2);text-transform:uppercase;letter-spacing:.4px}
+.campo select,.campo input{
+  background:var(--plot);color:var(--texto);border:1px solid var(--borde);
+  border-radius:4px;padding:7px 9px;font-family:var(--fuente);font-size:13px
+}
+
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+.kpi{
+  background:var(--panel);border:1px solid var(--borde);border-radius:6px;
+  padding:14px 16px;border-left:3px solid var(--cian)
+}
+.kpi .rot{font-size:11px;color:var(--texto2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px}
+.kpi .val{font-size:27px;font-weight:600;line-height:1.1}
+.kpi .pie{font-size:11px;color:var(--texto2);margin-top:5px}
+.kpi:nth-child(2){border-left-color:var(--ambar)}
+.kpi:nth-child(3){border-left-color:var(--magenta)}
+.kpi:nth-child(4){border-left-color:var(--verde)}
+
+/* gráficos */
+.grilla{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:18px}
+.tarjeta{
+  background:var(--panel);border:1px solid var(--borde);border-radius:6px;padding:14px 16px
+}
+.tarjeta h3{font-size:13px;font-weight:600;margin-bottom:12px}
+.tarjeta .caja{position:relative;height:250px}
+
+/* tabla */
+.tabla-caja{background:var(--panel);border:1px solid var(--borde);border-radius:6px;padding:14px 16px}
+.tabla-caja h3{font-size:13px;font-weight:600;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{
+  background:var(--header);color:var(--texto2);text-align:left;padding:8px 9px;
+  font-weight:600;text-transform:uppercase;font-size:10.5px;letter-spacing:.4px;
+  border-bottom:1px solid var(--borde);white-space:nowrap
+}
+td{
+  padding:7px 9px;border-bottom:1px solid #2A3A4E;
+  max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+tbody tr:hover{background:#243349}
+.pag{display:flex;gap:10px;align-items:center;margin-top:12px;color:var(--texto2);font-size:12px}
+
+.aviso{
+  background:#3A2418;border:1px solid var(--ambar);border-radius:6px;
+  padding:12px 16px;margin-bottom:16px;font-size:13px
+}
+.oculto{display:none !important}
+
+/* ============================================================
+   3. REPORTE A4 - LA CLAVE CONTRA DESBORDES
+   Cada hoja es una caja de tamaño fijo con overflow oculto.
+   El contenido se reparte antes de dibujar; nada puede crecer.
+   ============================================================ */
+#reporte{display:none}
+
+.hoja{
+  width:210mm;height:297mm;              /* tamaño fijo, no negociable */
+  padding:14mm 13mm 16mm 13mm;
+  box-sizing:border-box;
+  overflow:hidden;                        /* red de seguridad */
+  background:#FFFFFF;color:#1B2733;
+  position:relative;
+  font-family:var(--fuente);
+  page-break-after:always;
+  break-after:page;
+}
+.hoja:last-child{page-break-after:auto;break-after:auto}
+
+.hoja .enc{
+  border-bottom:2px solid #1F9DC4;padding-bottom:7px;margin-bottom:9mm;
+  display:flex;align-items:baseline;gap:10px;height:12mm
+}
+.hoja .enc .tit{font-size:15px;font-weight:600;color:#1F305C}
+.hoja .enc .meta{margin-left:auto;font-size:9.5px;color:#5B6B7F}
+
+.hoja .pie{
+  position:absolute;left:13mm;right:13mm;bottom:8mm;
+  border-top:1px solid #C9D3DE;padding-top:5px;
+  display:flex;font-size:9px;color:#5B6B7F;height:8mm
+}
+.hoja .pie .num{margin-left:auto}
+
+/* portada */
+.port-tit{font-size:30px;font-weight:700;color:#1F305C;line-height:1.15;margin-bottom:6mm}
+.port-sub{font-size:13px;color:#5B6B7F;margin-bottom:12mm}
+.port-kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:6mm;margin-bottom:12mm}
+.port-kpi{
+  border:1px solid #C9D3DE;border-left:4px solid #1F9DC4;border-radius:4px;
+  padding:5mm 6mm;height:26mm;overflow:hidden
+}
+.port-kpi .rot{font-size:9px;color:#5B6B7F;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3mm}
+.port-kpi .val{font-size:22px;font-weight:700;color:#1F305C;line-height:1}
+.port-kpi .pie2{font-size:9px;color:#5B6B7F;margin-top:2mm}
+.port-kpi:nth-child(2){border-left-color:#C8720A}
+.port-kpi:nth-child(3){border-left-color:#C0398C}
+.port-kpi:nth-child(4){border-left-color:#2FA98C}
+
+.ficha{border:1px solid #C9D3DE;border-radius:4px;padding:5mm 6mm}
+.ficha h4{font-size:11px;color:#1F305C;margin-bottom:3mm;text-transform:uppercase;letter-spacing:.4px}
+.ficha table{font-size:10px}
+.ficha td{border-bottom:1px solid #E6EBF1;padding:2.2mm 0;max-width:none;color:#1B2733}
+.ficha td:first-child{color:#5B6B7F;width:42%}
+
+/* bloques de gráfico dentro de la hoja: altura fija en mm */
+.bloque{margin-bottom:8mm}
+.bloque h4{font-size:12px;font-weight:600;color:#1F305C;margin-bottom:3mm}
+.bloque img{display:block;width:100%;height:105mm;object-fit:fill;border:1px solid #E6EBF1;border-radius:3px}
+
+/* tabla del reporte */
+.rep-tabla{width:100%;border-collapse:collapse;font-size:8.5px;table-layout:fixed}
+.rep-tabla th{
+  background:#1F305C;color:#FFF;text-align:left;padding:2mm 1.6mm;
+  font-size:8px;text-transform:uppercase;letter-spacing:.3px;border:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis   /* sin esto los títulos largos se pisan */
+}
+.rep-tabla td{
+  padding:1.7mm 1.6mm;border-bottom:1px solid #E6EBF1;color:#1B2733;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:none
+}
+.rep-tabla tbody tr:nth-child(even){background:#F7F9FB}
+
+/* ============================================================
+   4. IMPRESION
+   ============================================================ */
+@page{size:A4;margin:0}
+
+@media print{
+  body{background:#FFF}
+  .barra,.lienzo,#zona{display:none !important}
+  /* padding y fondo a cero: si se imprime desde la vista previa, ese padding corre todas las hojas */
+  #reporte{display:block !important;padding:0 !important;background:none !important}
+  .hoja{margin:0 !important;box-shadow:none !important}
+}
+
+/* pantallas angostas */
+@media (max-width:900px){
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .grilla{grid-template-columns:1fr}
+}
+@media (max-width:520px){
+  .lienzo{padding:16px}
+  .kpis{grid-template-columns:1fr}
+  .barra .der{margin-left:0}
+}
+
+/* vista previa del reporte en pantalla (opcional) */
+#reporte.previa{
+  display:block;background:#0F1926;padding:20px 0
+}
+#reporte.previa .hoja{margin:0 auto 20px;box-shadow:0 4px 18px rgba(0,0,0,.5)}
+</style>
+</head>
+
+<body>
+
+<!-- ============ BARRA SUPERIOR ============ -->
+<div class="barra">
+  <div>
+    <h1>Generador de Dashboards</h1>
+    <div class="sub">Excel o CSV &rarr; tablero interactivo &rarr; informe A4</div>
+  </div>
+  <div class="der">
+    <button class="btn sec oculto" id="btnPrevia">Ver informe</button>
+    <button class="btn sec oculto" id="btnOtro">Cargar otro archivo</button>
+    <button class="btn oculto" id="btnPDF">Exportar PDF</button>
+  </div>
+</div>
+
+<!-- ============ CUERPO ============ -->
+<div class="lienzo" id="lienzo">
+
+  <div id="zona">
+    <div class="icono">&#128202;</div>
+    <div class="t1">Arrastr&aacute; tu archivo ac&aacute;</div>
+    <div class="t2">o hac&eacute; clic para elegirlo &nbsp;&middot;&nbsp; .xlsx &middot; .xls &middot; .csv</div>
+    <input type="file" id="archivo" accept=".xlsx,.xls,.csv" style="display:none">
+  </div>
+
+  <div id="panel" class="oculto">
+    <div id="avisos"></div>
+    <div class="filtros" id="filtros"></div>
+    <div class="kpis" id="kpis"></div>
+    <div class="grilla" id="grilla"></div>
+    <div class="tabla-caja">
+      <h3 id="tituloTabla">Detalle de registros</h3>
+      <div style="overflow-x:auto"><table id="tabla"></table></div>
+      <div class="pag">
+        <button class="btn sec" id="ant">&larr; Anterior</button>
+        <span id="infoPag"></span>
+        <button class="btn sec" id="sig">Siguiente &rarr;</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============ REPORTE A4 (se construye por JS) ============ -->
+<div id="reporte"></div>
+
+<script>
+/* ==========================================================
+   CONFIGURACION
+   (los textos de CFG se insertan como HTML: no usar < ni &)
+   ========================================================== */
+const CFG = {
+  tituloInforme : "Informe de gestión",
+  organizacion  : "Tu organización",
+  filasPorHojaPDF : 35,   // filas de tabla por hoja A4
+  maxHojasTabla   : 20,   // tope de hojas de detalle en el PDF
+  columnasPDF     : 8,    // columnas máximas en la tabla del PDF
+  filasPorPagina  : 15,   // filas por página en pantalla
+  maxCategorias   : 12    // tope de categorías por gráfico
+};
+
+const PAL = {
+  cian:"#1F9DC4", ambar:"#F09C18", magenta:"#C0398C",
+  verde:"#2FA98C", violeta:"#7B68C4", coral:"#E2685C",
+  /* 9 colores: la dona admite 8 categorías más "(sin dato)" */
+  serie:["#1F9DC4","#F09C18","#C0398C","#2FA98C","#7B68C4","#E2685C","#4FB3D9","#F2B84B","#8DA2B8"]
+};
+
+/* estado */
+let DATOS = [], COLS = [], PERFIL = {}, FILTRADOS = [];
+let PLAN = [], CHARTS = [], IMAGENES = [], PAGINA = 0, NOMBRE_ARCHIVO = "", REPORTE_OK = false;
+
+/* ==========================================================
+   1. CARGA DEL ARCHIVO
+   ========================================================== */
+const zona = document.getElementById('zona');
+const input = document.getElementById('archivo');
+
+zona.addEventListener('click', () => input.click());
+zona.addEventListener('dragover', e => { e.preventDefault(); zona.classList.add('activa'); });
+zona.addEventListener('dragleave', () => zona.classList.remove('activa'));
+zona.addEventListener('drop', e => {
+  e.preventDefault(); zona.classList.remove('activa');
+  if (e.dataTransfer.files.length) procesar(e.dataTransfer.files[0]);
+});
+input.addEventListener('change', e => { if (e.target.files.length) procesar(e.target.files[0]); });
+
+function procesar(file){
+  NOMBRE_ARCHIVO = file.name;
+  const lector = new FileReader();
+  lector.onload = ev => {
+    try{
+      /* en CSV se leen los textos crudos: SheetJS interpreta dd/mm/aaaa como mm/dd */
+      const esCSV = /\.csv$/i.test(file.name);
+      const libro = XLSX.read(new Uint8Array(ev.target.result), {type:'array', cellDates:true, raw:esCSV});
+      const hoja  = libro.Sheets[libro.SheetNames[0]];
+      const matriz = XLSX.utils.sheet_to_json(hoja, {header:1, defval:null, blankrows:true});
+      if (!matriz.length) throw new Error("El archivo está vacío.");
+      const fh = detectarEncabezado(matriz);
+      const encabezados = normalizarEncabezados(matriz[fh]);
+      DATOS = matriz.slice(fh+1)
+        .filter(f => f.some(c => c !== null && c !== ""))
+        .map(f => { const o={}; encabezados.forEach((h,i)=> o[h] = f[i] ?? null); return o; });
+      if (!DATOS.length) throw new Error("No se encontraron filas de datos.");
+      COLS = encabezados;
+      arrancar(fh);
+    }catch(err){
+      alert("No pude leer el archivo.\n\n" + err.message);
+      console.error(err);
+    }
+  };
+  lector.readAsArrayBuffer(file);
+}
+
+/* Busca la fila que funciona como encabezado.
+   Sirve para planillas con título en la fila 1 y filas vacías. */
+function detectarEncabezado(m){
+  const tope = Math.min(m.length, 15);
+  let mejor = 0, mejorPuntaje = -1;
+  for (let i = 0; i < tope; i++){
+    const fila = m[i] || [];
+    const llenas = fila.filter(c => c !== null && String(c).trim() !== "").length;
+    if (llenas < 2) continue;
+    const textos = fila.filter(c => typeof c === 'string' && c.trim() !== "").length;
+    const sig = m[i+1] || [];
+    const sigLlenas = sig.filter(c => c !== null && String(c).trim() !== "").length;
+    const puntaje = textos * 2 + llenas + (sigLlenas >= llenas * 0.6 ? 6 : 0);
+    if (puntaje > mejorPuntaje){ mejorPuntaje = puntaje; mejor = i; }
+  }
+  return mejor;
+}
+
+function normalizarEncabezados(fila){
+  const vistos = {};
+  return fila.map((h,i) => {
+    let n = (h === null || String(h).trim() === "") ? ("Columna " + (i+1)) : String(h).trim();
+    if (vistos[n] !== undefined){ vistos[n]++; n = n + " (" + vistos[n] + ")"; } else vistos[n] = 1;
+    return n;
+  });
+}
+
+/* ==========================================================
+   2. PERFILADO DE COLUMNAS
+   ========================================================== */
+function perfilar(){
+  PERFIL = {};
+  const muestra = DATOS.slice(0, 400);
+  COLS.forEach(c => {
+    const vals = muestra.map(f => f[c]).filter(v => v !== null && v !== "");
+    let fechas=0, nums=0;
+    vals.forEach(v => {
+      if (v instanceof Date && !isNaN(v)) fechas++;
+      else if (typeof v === 'number') nums++;
+      else if (typeof v === 'string' && esFecha(v)) fechas++;
+      else if (aNumero(v) !== null) nums++;
+    });
+    const total = vals.length || 1;
+    const cobertura = muestra.length ? vals.length / muestra.length : 0;
+    let tipo = 'texto';
+    if (fechas / total > 0.7) tipo = 'fecha';
+    else if (nums / total > 0.8) tipo = 'numero';
+    const unicos = new Set(DATOS.map(f => f[c]).filter(v => v!==null && v!=="")).size;
+    PERFIL[c] = { tipo, unicos, llenos: vals.length, cobertura };
+  });
+}
+
+function esFecha(s){
+  return /^\d{4}-\d{2}-\d{2}/.test(s) || /^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(s);
+}
+function aFecha(v){
+  if (v instanceof Date) return isNaN(v) ? null : v;
+  if (typeof v === 'string'){
+    let m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (m){ let a = +m[3]; if (a<100) a += 2000; return new Date(a, +m[2]-1, +m[1]); }
+    /* aaaa-mm-dd se arma en hora local: new Date("aaaa-mm-dd") la toma como UTC y corre un día */
+    m = v.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+    if (m) return new Date(+m[1], +m[2]-1, +m[3], +(m[4]||0), +(m[5]||0), +(m[6]||0));
+    const d = new Date(v); return isNaN(d) ? null : d;
+  }
+  return null;
+}
+/* Acepta 1234,5 · 1.234,5 · 1,234.5 · 1234.5 · 1.234 (miles).
+   El separador que aparece último es el decimal. */
+function aNumero(v){
+  if (typeof v === 'number') return isNaN(v) ? null : v;
+  if (typeof v !== 'string') return null;
+  let s = v.trim().replace(/\s/g, '');
+  if (s === '') return null;
+  const p = s.lastIndexOf('.'), c = s.lastIndexOf(',');
+  if (p >= 0 && c >= 0) s = p > c ? s.replace(/,/g, '') : s.replace(/\./g, '').replace(',', '.');
+  else if (c >= 0) s = /^-?\d{1,3}(,\d{3}){2,}$/.test(s) ? s.replace(/,/g, '') : s.replace(',', '.');
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+  const n = Number(s);
+  return isNaN(n) ? null : n;
+}
+/* escapa texto antes de insertarlo con innerHTML */
+function esc(v){
+  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+const cols = t => COLS.filter(c => PERFIL[c].tipo === t);
+const categoricas = () => cols('texto')
+  .filter(c => PERFIL[c].unicos >= 2 && PERFIL[c].unicos <= 40 && PERFIL[c].cobertura > 0.5)
+  .sort((a,b) => PERFIL[a].unicos - PERFIL[b].unicos);
+
+/* ==========================================================
+   3. ARRANQUE
+   ========================================================== */
+function arrancar(filaEnc){
+  perfilar();
+  document.getElementById('zona').classList.add('oculto');
+  document.getElementById('panel').classList.remove('oculto');
+  ['btnPDF','btnOtro','btnPrevia'].forEach(id => document.getElementById(id).classList.remove('oculto'));
+
+  const avisos = [];
+  if (filaEnc > 0) avisos.push("Los encabezados se detectaron en la fila " + (filaEnc+1) + " de la planilla.");
+  const flojas = COLS.filter(c => PERFIL[c].cobertura < 0.5);
+  if (flojas.length) avisos.push("Columnas con muchos vacíos: " + flojas.slice(0,5).join(", ") + ".");
+  document.getElementById('avisos').innerHTML = avisos.length
+    ? '<div class="aviso">' + esc(avisos.join(" ")) + '</div>' : '';
+
+  construirFiltros();
+  PLAN = planificar();
+  aplicarFiltros();
+}
+
+/* ==========================================================
+   4. FILTROS
+   ========================================================== */
+function construirFiltros(){
+  const cont = document.getElementById('filtros');
+  cont.innerHTML = '';
+  categoricas().slice(0,3).forEach(c => {
+    const vals = [...new Set(DATOS.map(f => f[c]).filter(v => v!==null && v!==""))].sort();
+    const d = document.createElement('div'); d.className = 'campo';
+    const lab = document.createElement('label'); lab.textContent = c;
+    /* value explícito: sin él el navegador recorta espacios y el filtro no coincide */
+    const sel = document.createElement('select'); sel.dataset.col = c;
+    sel.add(new Option('Todos', ''));
+    vals.forEach(v => sel.add(new Option(String(v), String(v))));
+    d.append(lab, sel);
+    cont.appendChild(d);
+  });
+  const f = cols('fecha')[0];
+  if (f){
+    ['Desde','Hasta'].forEach(r => {
+      const d = document.createElement('div'); d.className='campo';
+      const lab = document.createElement('label'); lab.textContent = r;
+      const inp = document.createElement('input'); inp.type = 'date';
+      inp.dataset.fecha = r.toLowerCase(); inp.dataset.col = f;
+      d.append(lab, inp);
+      cont.appendChild(d);
+    });
+  }
+  const d = document.createElement('div'); d.className='campo';
+  d.innerHTML = '<label>&nbsp;</label><button class="btn sec" id="limpiar">Limpiar filtros</button>';
+  cont.appendChild(d);
+
+  cont.querySelectorAll('select,input').forEach(el => el.addEventListener('change', aplicarFiltros));
+  document.getElementById('limpiar').addEventListener('click', () => {
+    cont.querySelectorAll('select').forEach(s => s.value = '');
+    cont.querySelectorAll('input').forEach(i => i.value = '');
+    aplicarFiltros();
+  });
+}
+
+function filtrosActivos(){
+  const out = [];
+  document.querySelectorAll('#filtros select').forEach(s => {
+    if (s.value) out.push({ campo:s.dataset.col, valor:s.value });
+  });
+  document.querySelectorAll('#filtros input[data-fecha]').forEach(i => {
+    if (i.value) out.push({ campo:i.dataset.col + (i.dataset.fecha==='desde'?' (desde)':' (hasta)'), valor:i.value });
+  });
+  return out;
+}
+
+function aplicarFiltros(){
+  FILTRADOS = DATOS.filter(f => {
+    for (const s of document.querySelectorAll('#filtros select'))
+      if (s.value && String(f[s.dataset.col]) !== s.value) return false;
+    for (const i of document.querySelectorAll('#filtros input[data-fecha]')){
+      if (!i.value) continue;
+      const d = aFecha(f[i.dataset.col]); if (!d) return false;
+      /* "hasta" incluye el día completo */
+      const lim = new Date(i.value + (i.dataset.fecha === 'hasta' ? "T23:59:59.999" : "T00:00:00"));
+      if (i.dataset.fecha === 'desde' && d < lim) return false;
+      if (i.dataset.fecha === 'hasta' && d > lim) return false;
+    }
+    return true;
+  });
+  PAGINA = 0;
+  REPORTE_OK = false;
+  dibujar();
+}
+
+/* ==========================================================
+   5. PLAN DE GRAFICOS
+   ========================================================== */
+function planificar(){
+  const plan = [], cats = categoricas(), nums = cols('numero'), fec = cols('fecha')[0];
+
+  if (fec) plan.push({ id:'g1', tipo:'linea', titulo:'Evolución mensual de registros', fecha:fec });
+  if (cats[0]) plan.push({ id:'g2', tipo:'barra', titulo:'Registros por ' + cats[0].toLowerCase(), cat:cats[0] });
+  const dona = cats.find(c => PERFIL[c].unicos <= 8 && c !== (cats[0]||''));
+  if (dona) plan.push({ id:'g3', tipo:'dona', titulo:'Distribución por ' + dona.toLowerCase(), cat:dona });
+  const usadas = plan.map(x => x.cat).filter(Boolean);
+  const barh = cats.find(c => !usadas.includes(c));
+  if (barh) plan.push({ id:'g4', tipo:'barraH', titulo:'Ranking por ' + barh.toLowerCase(), cat:barh });
+  if (nums[0] && cats[0])
+    plan.push({ id:'g5', tipo:'barra', titulo:'Promedio de ' + nums[0].toLowerCase() + ' por ' + cats[0].toLowerCase(),
+                cat:cats[0], num:nums[0], agr:'promedio' });
+  if (nums[0]) plan.push({ id:'g6', tipo:'histograma', titulo:'Distribución de ' + nums[0].toLowerCase(), num:nums[0] });
+
+  return plan.slice(0,6);
+}
+
+/* agregaciones */
+function porCategoria(cat, num, agr){
+  const m = new Map();
+  FILTRADOS.forEach(f => {
+    const k = (f[cat] === null || f[cat] === "") ? "(sin dato)" : String(f[cat]);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(num ? aNumero(f[num]) : 1);
+  });
+  const agregar = v => {
+    const limpios = v.filter(x => x !== null);
+    if (!num) return v.length;
+    if (agr === 'promedio') return limpios.length ? limpios.reduce((a,b)=>a+b,0)/limpios.length : 0;
+    return limpios.reduce((a,b)=>a+b,0);
+  };
+  let arr = [...m.entries()].map(([k,v]) => ({ k, v: agregar(v), crudos: v }));
+  arr.sort((a,b) => b.v - a.v);
+  if (arr.length > CFG.maxCategorias){
+    /* "Otros" se agrega sobre los valores originales: sumar promedios no tiene sentido */
+    const resto = arr.slice(CFG.maxCategorias).flatMap(x => x.crudos);
+    arr = arr.slice(0, CFG.maxCategorias);
+    arr.push({ k:'Otros', v: agregar(resto) });
+  }
+  return arr.map(({k, v}) => ({k, v}));
+}
+
+function porMes(campo){
+  const m = new Map();
+  FILTRADOS.forEach(f => {
+    const d = aFecha(f[campo]); if (!d) return;
+    const k = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,'0');
+    m.set(k, (m.get(k)||0) + 1);
+  });
+  if (!m.size) return [];
+  /* se completan los meses sin registros con 0 para que la línea no salte huecos */
+  const claves = [...m.keys()].sort();
+  let [a, mm] = claves[0].split('-').map(Number);
+  const [af, mf] = claves[claves.length-1].split('-').map(Number);
+  const out = [];
+  while (a < af || (a === af && mm <= mf)){
+    const k = a + "-" + String(mm).padStart(2,'0');
+    out.push({ k, v: m.get(k) || 0 });
+    if (++mm > 12){ mm = 1; a++; }
+  }
+  return out;
+}
+
+function histograma(campo){
+  const vals = FILTRADOS.map(f => aNumero(f[campo])).filter(v => v !== null);
+  if (!vals.length) return [];
+  /* reduce en lugar de Math.min(...vals): con muchas filas el spread desborda la pila */
+  const min = vals.reduce((a,b) => a < b ? a : b), max = vals.reduce((a,b) => a > b ? a : b);
+  if (min === max) return [{ k: fmt(min), v: vals.length }];
+  const n = 8, paso = (max-min)/n, cajas = new Array(n).fill(0);
+  vals.forEach(v => { let i = Math.floor((v-min)/paso); if (i >= n) i = n-1; cajas[i]++; });
+  /* decimales según el ancho del intervalo, para que las etiquetas no se repitan */
+  const dec = paso >= 10 ? 0 : paso >= 1 ? 1 : 2;
+  return cajas.map((c,i) => ({ k: fmt(min+paso*i,dec) + "–" + fmt(min+paso*(i+1),dec), v:c }));
+}
+
+/* ==========================================================
+   6. DIBUJO EN PANTALLA
+   ========================================================== */
+function dibujar(){
+  dibujarKPIs();
+  dibujarGraficos();
+  dibujarTabla();
+}
+
+function fmt(n, dec){
+  if (n === null || n === undefined || isNaN(n)) return "—";
+  const d = dec !== undefined ? dec : (Math.abs(n) < 10 && n % 1 !== 0 ? 2 : 0);
+  return n.toLocaleString('es-AR', { minimumFractionDigits:d, maximumFractionDigits:d });
+}
+
+function calcularKPIs(){
+  const k = [];
+  k.push({ rot:'Registros', val: fmt(FILTRADOS.length),
+           pie: FILTRADOS.length === DATOS.length ? 'total del archivo'
+                : fmt(DATOS.length) + ' sin filtrar' });
+
+  const f = cols('fecha')[0];
+  if (f){
+    const ds = FILTRADOS.map(r => aFecha(r[f])).filter(Boolean).sort((a,b)=>a-b);
+    k.push({ rot:'Período', val: ds.length ? meses(ds[0], ds[ds.length-1]) + ' meses' : '—',
+             pie: ds.length ? fecha(ds[0]) + ' a ' + fecha(ds[ds.length-1]) : 'sin fechas válidas' });
+  }
+  const nums = cols('numero');
+  if (nums[0]){
+    const v = FILTRADOS.map(r => aNumero(r[nums[0]])).filter(x => x !== null);
+    const prom = v.length ? v.reduce((a,b)=>a+b,0)/v.length : null;
+    k.push({ rot:'Prom. ' + nums[0], val: fmt(prom, 1), pie: fmt(v.length) + ' valores' });
+  }
+  const c = categoricas()[0];
+  if (c){
+    const top = porCategoria(c)[0];
+    k.push({ rot:c + ' principal', val: top ? top.k : '—',
+             pie: top ? fmt(top.v) + ' registros (' + fmt(top.v/FILTRADOS.length*100,1) + '%)' : '' });
+  }
+  /* nums[0] ya se usó en el promedio: se sigue desde la segunda columna numérica */
+  for (let j = 1; k.length < 4 && j < nums.length; j++){
+    const n = nums[j];
+    const v = FILTRADOS.map(r => aNumero(r[n])).filter(x => x !== null);
+    k.push({ rot:'Total ' + n, val: fmt(v.reduce((a,b)=>a+b,0)), pie:'suma de la columna' });
+  }
+  return k.slice(0,4);
+}
+
+const fecha = d => String(d.getDate()).padStart(2,'0') + '/' +
+  String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear();
+const meses = (a,b) => (b.getFullYear()-a.getFullYear())*12 + (b.getMonth()-a.getMonth()) + 1;
+
+function dibujarKPIs(){
+  document.getElementById('kpis').innerHTML = calcularKPIs().map(k =>
+    '<div class="kpi"><div class="rot">'+esc(k.rot)+'</div><div class="val">'+esc(k.val)+'</div><div class="pie">'+esc(k.pie)+'</div></div>'
+  ).join('');
+}
+
+function datosDe(spec){
+  if (spec.tipo === 'linea')      return porMes(spec.fecha);
+  if (spec.tipo === 'histograma') return histograma(spec.num);
+  return porCategoria(spec.cat, spec.num, spec.agr);
+}
+
+function configChart(spec, datos, tema){
+  const claro = tema === 'claro';
+  const texto = claro ? '#5B6B7F' : '#8DA2B8';
+  const grilla = claro ? '#E6EBF1' : '#30546C';
+  const labels = datos.map(d => d.k);
+  const valores = datos.map(d => d.v);
+  const esDona = spec.tipo === 'dona';
+  const esH = spec.tipo === 'barraH';
+
+  /* En el informe el lienzo se dibuja a 1600px y luego se reduce a 184mm.
+     Por eso las fuentes van al doble: al achicarse quedan legibles en papel. */
+  const fz = claro ? 22 : 11;
+
+  return {
+    type: spec.tipo === 'linea' ? 'line' : (esDona ? 'doughnut' : 'bar'),
+    data: {
+      labels,
+      datasets: [{
+        label: spec.titulo,
+        data: valores,
+        backgroundColor: esDona ? PAL.serie : (spec.tipo === 'linea' ? 'rgba(31,157,196,.22)' : PAL.cian),
+        borderColor: spec.tipo === 'linea' ? PAL.cian : (esDona ? (claro ? '#FFF' : '#1E2B3B') : PAL.cian),
+        borderWidth: spec.tipo === 'linea' ? (claro ? 4 : 2) : (esDona ? 2 : 0),
+        fill: spec.tipo === 'linea',
+        tension: .3,
+        pointRadius: claro ? 0 : 2,
+        borderRadius: esDona ? 0 : 3,
+        maxBarThickness: claro ? 130 : 70
+      }]
+    },
+    options: {
+      indexAxis: esH ? 'y' : 'x',
+      /* clave: en el informe NO es responsivo, se dibuja al tamaño exacto del lienzo */
+      responsive: !claro,
+      maintainAspectRatio: false,
+      devicePixelRatio: claro ? 1 : undefined,
+      animation: false,
+      cutout: esDona ? '58%' : undefined,
+      layout: { padding: claro ? 18 : 0 },
+      plugins: {
+        legend: {
+          display: esDona,
+          position: 'right',
+          labels: { color: texto, font:{ size: fz, family:'Segoe UI' },
+                    boxWidth: claro ? 22 : 12, padding: claro ? 14 : 8 }
+        },
+        tooltip: { enabled: !claro }
+      },
+      scales: esDona ? {} : {
+        x: { ticks:{ color:texto, font:{size: fz, family:'Segoe UI'},
+                     maxRotation:45, minRotation:0, autoSkip:true,
+                     maxTicksLimit: esH ? 8 : 14,
+                     callback:function(v){ const l = this.getLabelForValue(v);
+                       return String(l).length > 16 ? String(l).slice(0,15)+'…' : l; } },
+             grid:{ color:grilla, display: esH, lineWidth: claro ? 1.5 : 1 } },
+        y: { beginAtZero:true,
+             ticks:{ color:texto, font:{size: fz, family:'Segoe UI'}, autoSkip:true, maxTicksLimit:8,
+                     callback:function(v){ const l = esH ? this.getLabelForValue(v) : v;
+                       return esH && String(l).length > 22 ? String(l).slice(0,21)+'…' : l; } },
+             grid:{ color:grilla, display: !esH, lineWidth: claro ? 1.5 : 1 } }
+      }
+    }
+  };
+}
+
+function dibujarGraficos(){
+  CHARTS.forEach(c => c.destroy()); CHARTS = [];
+  const g = document.getElementById('grilla');
+  g.innerHTML = PLAN.map(s =>
+    '<div class="tarjeta"><h3>'+esc(s.titulo)+'</h3><div class="caja"><canvas id="cv-'+s.id+'"></canvas></div></div>'
+  ).join('');
+  PLAN.forEach(s => {
+    const datos = datosDe(s);
+    const ctx = document.getElementById('cv-'+s.id).getContext('2d');
+    CHARTS.push(new Chart(ctx, configChart(s, datos, 'oscuro')));
+  });
+}
+
+function dibujarTabla(){
+  const t = document.getElementById('tabla');
+  const ini = PAGINA * CFG.filasPorPagina;
+  const pagina = FILTRADOS.slice(ini, ini + CFG.filasPorPagina);
+  t.innerHTML =
+    '<thead><tr>' + COLS.map(c => '<th>'+esc(c)+'</th>').join('') + '</tr></thead>' +
+    '<tbody>' + pagina.map(f => '<tr>' + COLS.map(c => '<td>'+celda(f[c])+'</td>').join('') + '</tr>').join('') + '</tbody>';
+  const tot = Math.max(1, Math.ceil(FILTRADOS.length / CFG.filasPorPagina));
+  document.getElementById('infoPag').textContent =
+    'Página ' + (PAGINA+1) + ' de ' + tot + '  ·  ' + fmt(FILTRADOS.length) + ' registros';
+  document.getElementById('ant').disabled = PAGINA === 0;
+  document.getElementById('sig').disabled = PAGINA >= tot-1;
+  document.getElementById('tituloTabla').textContent =
+    'Detalle de registros (' + fmt(FILTRADOS.length) + ')';
+}
+
+function celda(v){
+  if (v === null || v === undefined || v === "") return '—';
+  if (v instanceof Date) return fecha(v);
+  if (typeof v === 'number') return fmt(v);
+  return esc(v);
+}
+
+document.getElementById('ant').addEventListener('click', () => { if (PAGINA>0){ PAGINA--; dibujarTabla(); } });
+document.getElementById('sig').addEventListener('click', () => {
+  if (PAGINA < Math.ceil(FILTRADOS.length/CFG.filasPorPagina)-1){ PAGINA++; dibujarTabla(); }
+});
+document.getElementById('btnOtro').addEventListener('click', () => location.reload());
+
+/* ==========================================================
+   7. REPORTE A4
+   Los gráficos se congelan como imágenes de tamaño fijo y la
+   tabla se parte en bloques. Ninguna caja puede crecer.
+   ========================================================== */
+function congelarGraficos(){
+  IMAGENES = [];
+  const cont = document.createElement('div');
+  cont.style.cssText = 'position:fixed;left:-9999px;top:0;width:1700px';
+  document.body.appendChild(cont);
+  /* 184mm de ancho util x 105mm de alto -> mismo aspecto que la caja del informe,
+     asi la imagen entra justa y no queda ni estirada ni con franjas en blanco */
+  const ANCHO = 1600, ALTO = Math.round(1600 * 105 / 184);
+  PLAN.forEach(s => {
+    const cv = document.createElement('canvas');
+    cv.width = ANCHO; cv.height = ALTO;
+    cv.style.width = ANCHO + 'px'; cv.style.height = ALTO + 'px';
+    cont.appendChild(cv);
+    const ch = new Chart(cv.getContext('2d'), configChart(s, datosDe(s), 'claro'));
+    IMAGENES.push({ titulo: s.titulo, src: cv.toDataURL('image/png', 1) });
+    ch.destroy();
+  });
+  document.body.removeChild(cont);
+}
+
+function hoja(titulo, contenido, n, total){
+  return '<div class="hoja">' +
+    '<div class="enc"><div class="tit">'+esc(titulo)+'</div>' +
+    '<div class="meta">'+CFG.organizacion+' · '+fecha(new Date())+'</div></div>' +
+    contenido +
+    '<div class="pie"><div>'+CFG.tituloInforme+' — '+esc(NOMBRE_ARCHIVO)+'</div>' +
+    '<div class="num">Página '+n+' de '+total+'</div></div></div>';
+}
+
+function construirReporte(){
+  congelarGraficos();
+
+  const k = calcularKPIs();
+  const fa = filtrosActivos();
+  const bloquesTabla = Math.ceil(FILTRADOS.length / CFG.filasPorHojaPDF);
+  const hojasGraficos = Math.ceil(IMAGENES.length / 2);
+  const hojasTabla = Math.min(bloquesTabla, CFG.maxHojasTabla);
+  const filasDetalle = Math.min(FILTRADOS.length, hojasTabla * CFG.filasPorHojaPDF);
+  const total = 1 + hojasGraficos + hojasTabla;
+
+  let html = '', n = 1;
+
+  /* --- portada --- */
+  let porta = '<div class="port-tit">'+CFG.tituloInforme+'</div>' +
+    '<div class="port-sub">Origen: '+esc(NOMBRE_ARCHIVO)+' · '+fmt(FILTRADOS.length)+' registros analizados</div>' +
+    '<div class="port-kpis">' + k.map(x =>
+      '<div class="port-kpi"><div class="rot">'+esc(x.rot)+'</div><div class="val">'+esc(x.val)+
+      '</div><div class="pie2">'+esc(x.pie)+'</div></div>').join('') + '</div>';
+
+  porta += '<div class="ficha"><h4>Ficha técnica</h4><table>' +
+    fila('Archivo de origen', NOMBRE_ARCHIVO) +
+    fila('Registros del archivo', fmt(DATOS.length)) +
+    fila('Registros en el informe', fmt(FILTRADOS.length)) +
+    fila('Filas en el detalle', filasDetalle < FILTRADOS.length
+      ? 'primeras ' + fmt(filasDetalle) + ' de ' + fmt(FILTRADOS.length) : 'todas') +
+    fila('Columnas analizadas', String(COLS.length)) +
+    fila('Filtros aplicados', fa.length ? fa.map(f => f.campo+': '+f.valor).join(' · ') : 'ninguno') +
+    fila('Visualizaciones', String(IMAGENES.length)) +
+    fila('Generado', fecha(new Date())) +
+    '</table></div>';
+
+  html += hoja('Resumen ejecutivo', porta, n++, total);
+
+  /* --- gráficos: 2 por hoja --- */
+  for (let i = 0; i < IMAGENES.length; i += 2){
+    const par = IMAGENES.slice(i, i+2);
+    const c = par.map(img =>
+      '<div class="bloque"><h4>'+esc(img.titulo)+'</h4>' +
+      '<img src="'+img.src+'" alt=""></div>').join('');
+    html += hoja('Análisis gráfico ' + (Math.floor(i/2)+1), c, n++, total);
+  }
+
+  /* --- tabla: bloques de tamaño fijo --- */
+  const colsPDF = COLS.slice(0, CFG.columnasPDF);
+  const ancho = (100 / colsPDF.length).toFixed(2) + '%';
+  for (let i = 0; i < FILTRADOS.length && n <= total; i += CFG.filasPorHojaPDF){
+    const bloque = FILTRADOS.slice(i, i + CFG.filasPorHojaPDF);
+    const c = '<table class="rep-tabla"><thead><tr>' +
+      colsPDF.map(x => '<th style="width:'+ancho+'">'+esc(x)+'</th>').join('') + '</tr></thead><tbody>' +
+      bloque.map(f => '<tr>' + colsPDF.map(x => '<td>'+celda(f[x])+'</td>').join('') + '</tr>').join('') +
+      '</tbody></table>';
+    html += hoja('Detalle de registros ('+(i+1)+'–'+Math.min(i+CFG.filasPorHojaPDF, FILTRADOS.length)+')', c, n++, total);
+  }
+
+  document.getElementById('reporte').innerHTML = html;
+  REPORTE_OK = true;
+}
+
+const fila = (a,b) => '<tr><td>'+esc(a)+'</td><td>'+esc(b)+'</td></tr>';
+
+document.getElementById('btnPDF').addEventListener('click', () => {
+  construirReporte();
+  setTimeout(() => window.print(), 120);
+});
+
+/* Ctrl+P sin pasar por el botón: se rearma si los filtros cambiaron */
+window.addEventListener('beforeprint', () => {
+  if (DATOS.length && !REPORTE_OK) construirReporte();
+});
+
+document.getElementById('btnPrevia').addEventListener('click', () => {
+  const r = document.getElementById('reporte');
+  if (r.classList.contains('previa')){
+    r.classList.remove('previa');
+    document.getElementById('lienzo').classList.remove('oculto');
+    document.getElementById('btnPrevia').textContent = 'Ver informe';
+  } else {
+    construirReporte();
+    r.classList.add('previa');
+    document.getElementById('lienzo').classList.add('oculto');
+    document.getElementById('btnPrevia').textContent = 'Volver al tablero';
+  }
+});
+</script>
+</body>
+</html>
