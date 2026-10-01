@@ -4,6 +4,34 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Generador de Dashboards</title>
+<meta name="description" content="Convertí un Excel o CSV en un tablero interactivo con KPIs, gráficos y filtros, y exportalo como informe PDF en A4. Todo se procesa en tu navegador: el archivo no se sube a ningún servidor.">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#182843">
+<link rel="canonical" href="https://raceballos01.github.io/Tests1/Generador_Dashboard.html">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23182843'/%3E%3Crect x='7' y='16' width='4' height='9' fill='%231F9DC4'/%3E%3Crect x='14' y='10' width='4' height='15' fill='%23F09C18'/%3E%3Crect x='21' y='6' width='4' height='19' fill='%232FA98C'/%3E%3C/svg%3E">
+
+<!-- vista previa al compartir el enlace -->
+<meta property="og:type" content="website">
+<meta property="og:locale" content="es_AR">
+<meta property="og:title" content="Generador de Dashboards">
+<meta property="og:description" content="Excel o CSV → tablero interactivo → informe PDF A4, directo en el navegador.">
+<meta property="og:url" content="https://raceballos01.github.io/Tests1/Generador_Dashboard.html">
+<meta name="twitter:card" content="summary">
+
+<!-- datos estructurados para buscadores -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Generador de Dashboards",
+  "url": "https://raceballos01.github.io/Tests1/Generador_Dashboard.html",
+  "description": "Convierte un archivo Excel o CSV en un tablero interactivo con KPIs, gráficos y filtros, y lo exporta como informe PDF en A4.",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Cualquiera (navegador web)",
+  "inLanguage": "es",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
 
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
@@ -310,23 +338,29 @@ zona.addEventListener('drop', e => {
 input.addEventListener('change', e => { if (e.target.files.length) procesar(e.target.files[0]); });
 
 function procesar(file){
-  NOMBRE_ARCHIVO = file.name;
   const lector = new FileReader();
   lector.onload = ev => {
     try{
       /* en CSV se leen los textos crudos: SheetJS interpreta dd/mm/aaaa como mm/dd */
       const esCSV = /\.csv$/i.test(file.name);
-      const libro = XLSX.read(new Uint8Array(ev.target.result), {type:'array', cellDates:true, raw:esCSV});
+      const bytes = new Uint8Array(ev.target.result);
+      const libro = esCSV
+        ? XLSX.read(textoCSV(bytes), {type:'string', raw:true})
+        : XLSX.read(bytes, {type:'array', cellDates:true});
       const hoja  = libro.Sheets[libro.SheetNames[0]];
       const matriz = XLSX.utils.sheet_to_json(hoja, {header:1, defval:null, blankrows:true});
       if (!matriz.length) throw new Error("El archivo está vacío.");
       const fh = detectarEncabezado(matriz);
       const encabezados = normalizarEncabezados(matriz[fh]);
-      DATOS = matriz.slice(fh+1)
+      /* el estado global se reemplaza solo si el archivo es válido:
+         una carga fallida no debe romper el tablero que ya está en pantalla */
+      const filas = matriz.slice(fh+1)
         .filter(f => f.some(c => c !== null && c !== ""))
         .map(f => { const o={}; encabezados.forEach((h,i)=> o[h] = f[i] ?? null); return o; });
-      if (!DATOS.length) throw new Error("No se encontraron filas de datos.");
+      if (!filas.length) throw new Error("No se encontraron filas de datos.");
+      DATOS = filas;
       COLS = encabezados;
+      NOMBRE_ARCHIVO = file.name;
       arrancar(fh);
     }catch(err){
       alert("No pude leer el archivo.\n\n" + err.message);
@@ -334,6 +368,15 @@ function procesar(file){
     }
   };
   lector.readAsArrayBuffer(file);
+}
+
+/* SheetJS lee los CSV como Latin-1 y rompe los acentos de un CSV en UTF-8.
+   Se prueba UTF-8 estricto y, si falla, Windows-1252 (CSV guardado por Excel). */
+function textoCSV(bytes){
+  let txt;
+  try { txt = new TextDecoder('utf-8', {fatal:true}).decode(bytes); }
+  catch { txt = new TextDecoder('windows-1252').decode(bytes); }
+  return txt.replace(/^﻿/, '');
 }
 
 /* Busca la fila que funciona como encabezado.
